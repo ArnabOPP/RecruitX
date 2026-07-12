@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.parser.extractor import SUPPORTED_EXTENSIONS
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -45,7 +46,7 @@ def test_capabilities(client):
     resp = client.get("/api/v1/capabilities")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["supported_file_types"] == [".docx", ".pdf", ".txt"]
+    assert body["supported_file_types"] == sorted(SUPPORTED_EXTENSIONS)
     assert "max_upload_bytes" in body
 
 

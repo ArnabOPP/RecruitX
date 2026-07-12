@@ -1,10 +1,12 @@
-"""OCR fallback for scanned/image-only PDFs.
+"""OCR for scanned/image-only PDFs and directly-uploaded image résumés.
 
 pdfplumber (and any text-layer extractor) returns nothing for a résumé that
 was scanned from paper or exported as a flattened image — there's no text
 object to read, only pixels. Rather than fail the whole upload, we rasterize
-each page with pypdfium2 (already a transitive dependency, no external
+each PDF page with pypdfium2 (already a transitive dependency, no external
 poppler binary needed — unlike pdf2image) and run Tesseract over the image.
+A résumé uploaded directly as a JPG/PNG (e.g. a phone screenshot) skips the
+PDF-rendering step and goes straight to the same Tesseract call.
 
 Like the transformer NER model, this is optional and fails soft: if
 Tesseract isn't installed on the host, OCR is skipped with a logged warning
@@ -20,6 +22,7 @@ import logging
 from functools import lru_cache
 
 import pypdfium2 as pdfium
+from PIL import Image, UnidentifiedImageError
 
 from ..config import get_settings
 
@@ -102,6 +105,29 @@ class OcrEngine:
             pdf.close()
 
         return "\n".join(lines), warnings
+
+    def extract_text_from_image(self, data: bytes) -> tuple[str, list[str]]:
+        """OCR a standalone image (JPG/PNG) directly — no PDF rendering step,
+        since there's no PDF to rasterize; the uploaded bytes already are
+        the page image."""
+        self._ensure_loaded()
+        if not self.available or self._pytesseract is None:
+            return "", ["OCR unavailable — Tesseract is not installed on this host."]
+
+        try:
+            image = Image.open(io.BytesIO(data))
+            image.load()
+        except (UnidentifiedImageError, OSError) as exc:
+            logger.warning("OCR: failed to open image (%s).", exc)
+            return "", [f"OCR failed: could not read image ({exc})."]
+
+        try:
+            text = self._pytesseract.image_to_string(image)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("OCR failed on uploaded image (%s).", exc)
+            return "", ["OCR failed on the uploaded image."]
+
+        return text, []
 
 
 @lru_cache(maxsize=1)

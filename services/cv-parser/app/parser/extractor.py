@@ -20,7 +20,8 @@ import pdfplumber
 from ..config import get_settings
 from .ocr import get_ocr_engine
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt"}
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".jpg", ".jpeg", ".png"}
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
 
 class UnsupportedFileTypeError(ValueError):
@@ -48,6 +49,14 @@ def _validate_signature(ext: str, data: bytes) -> None:
     if ext == ".docx" and not data.startswith(b"PK\x03\x04"):
         raise FileSignatureMismatchError(
             "File claims to be a .docx but doesn't have a valid ZIP/OOXML signature."
+        )
+    if ext in (".jpg", ".jpeg") and not data.startswith(b"\xff\xd8\xff"):
+        raise FileSignatureMismatchError(
+            "File claims to be a JPEG but doesn't start with a JPEG signature."
+        )
+    if ext == ".png" and not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise FileSignatureMismatchError(
+            "File claims to be a PNG but doesn't start with a PNG signature."
         )
     # .txt has no reliable magic bytes — skipped.
 
@@ -143,6 +152,31 @@ def _extract_docx(data: bytes) -> tuple[str, int, list[str]]:
     return "\n".join(parts), 1, []
 
 
+def _extract_image(data: bytes) -> tuple[str, int, list[str]]:
+    """A résumé uploaded directly as a JPG/PNG (e.g. a phone screenshot) has
+    no text layer at all by definition — it's OCR or nothing, every time,
+    unlike a PDF where OCR is only a fallback for the scanned-document case.
+    """
+    settings = get_settings()
+    if not settings.enable_ocr:
+        return (
+            "",
+            1,
+            [
+                "Image uploads require OCR to extract any text, and OCR is "
+                "currently disabled (CV_PARSER_ENABLE_OCR=0)."
+            ],
+        )
+
+    text, warnings = get_ocr_engine().extract_text_from_image(data)
+    if text.strip():
+        warnings.append(
+            "Text recovered via OCR from an uploaded image and may contain "
+            "recognition errors."
+        )
+    return text, 1, warnings
+
+
 def _extract_txt(data: bytes) -> tuple[str, int, list[str]]:
     for encoding in ("utf-8", "utf-16", "cp1252", "latin-1"):
         try:
@@ -164,6 +198,8 @@ def extract_document(filename: str, data: bytes) -> ExtractedDocument:
         text, page_count, warnings = _extract_pdf(data)
     elif ext == ".docx":
         text, page_count, warnings = _extract_docx(data)
+    elif ext in _IMAGE_EXTENSIONS:
+        text, page_count, warnings = _extract_image(data)
     else:
         text, page_count, warnings = _extract_txt(data)
 

@@ -122,10 +122,11 @@ def test_txt_has_no_signature_check():
     assert "just plain text" in doc.text
 
 
-def _build_scanned_pdf(lines: list[str]) -> bytes:
-    """Build a PDF whose "text" is actually a rasterized image with no
-    underlying text layer — simulates a scanned/photographed résumé, which
-    a normal text-layer extractor (pdfplumber) recovers nothing from."""
+def _render_text_image(lines: list[str]) -> Image.Image:
+    """Render lines of text onto a blank white image — the shared building
+    block for both a "scanned PDF" fixture (image embedded in a PDF with no
+    text layer) and a directly-uploaded "screenshot" fixture (just the
+    image itself)."""
     img_width, img_height = 1600, 150 * len(lines) + 100
     image = Image.new("RGB", (img_width, img_height), "white")
     draw = ImageDraw.Draw(image)
@@ -137,6 +138,22 @@ def _build_scanned_pdf(lines: list[str]) -> bytes:
     for line in lines:
         draw.text((40, y), line, fill="black", font=font)
         y += 150
+    return image
+
+
+def _build_image_bytes(lines: list[str], fmt: str = "PNG") -> bytes:
+    image = _render_text_image(lines)
+    buf = io.BytesIO()
+    image.save(buf, format=fmt)
+    return buf.getvalue()
+
+
+def _build_scanned_pdf(lines: list[str]) -> bytes:
+    """Build a PDF whose "text" is actually a rasterized image with no
+    underlying text layer — simulates a scanned/photographed résumé, which
+    a normal text-layer extractor (pdfplumber) recovers nothing from."""
+    image = _render_text_image(lines)
+    img_width, img_height = image.size
 
     img_buf = io.BytesIO()
     image.save(img_buf, format="PNG")
@@ -190,3 +207,56 @@ def test_ocr_engine_availability_reflects_tesseract_install():
     # install degrades gracefully instead of crashing the pipeline.
     engine = get_ocr_engine()
     assert isinstance(engine.available, bool)
+
+
+# --- Direct image upload (JPG/PNG) ------------------------------------------
+
+
+def test_png_upload_is_ocrd_directly():
+    engine = get_ocr_engine()
+    engine._ensure_loaded()  # noqa: SLF001
+    if not engine.available:
+        pytest.skip("Tesseract is not installed in this environment")
+    data = _build_image_bytes(["SOFTWARE ENGINEER", "SKILLS PYTHON DOCKER"], fmt="PNG")
+    doc = extract_document("resume_screenshot.png", data)
+    assert doc.file_type == "png"
+    text_upper = doc.text.upper()
+    assert "SOFTWARE" in text_upper or "ENGINEER" in text_upper
+    assert any("OCR" in w for w in doc.warnings)
+
+
+def test_jpg_upload_is_ocrd_directly():
+    engine = get_ocr_engine()
+    engine._ensure_loaded()  # noqa: SLF001
+    if not engine.available:
+        pytest.skip("Tesseract is not installed in this environment")
+    data = _build_image_bytes(["SOFTWARE ENGINEER"], fmt="JPEG")
+    doc = extract_document("resume_screenshot.jpg", data)
+    assert doc.file_type == "jpg"
+    assert "SOFTWARE" in doc.text.upper() or "ENGINEER" in doc.text.upper()
+
+
+def test_image_upload_ocr_disabled_raises_empty(monkeypatch):
+    monkeypatch.setenv("CV_PARSER_ENABLE_OCR", "0")
+    get_settings.cache_clear()
+    get_ocr_engine.cache_clear()
+    data = _build_image_bytes(["SOFTWARE ENGINEER"], fmt="PNG")
+    with pytest.raises(EmptyDocumentError):
+        extract_document("resume_screenshot.png", data)
+
+
+def test_png_signature_mismatch_raises():
+    with pytest.raises(FileSignatureMismatchError):
+        extract_document("resume.png", b"not actually a png")
+
+
+def test_jpg_signature_mismatch_raises():
+    with pytest.raises(FileSignatureMismatchError):
+        extract_document("resume.jpg", b"not actually a jpeg")
+
+
+def test_bmp_still_unsupported():
+    # Only JPG/PNG were added — an arbitrary other image format should
+    # still be rejected, not silently accepted.
+    with pytest.raises(UnsupportedFileTypeError):
+        extract_document("resume.bmp", b"BM\x00\x00\x00\x00")

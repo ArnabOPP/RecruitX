@@ -4,8 +4,9 @@ Implements FR-08 / FR-09 and the "CV parsing NLP pipeline — spaCy NER +
 transformer (BERT-class) résumé parser" line item from the Recruitix BRD's
 AI & ML Model Architecture section. Extracts structured contact info,
 skills, education, experience, projects, and certifications from an
-uploaded résumé (PDF / DOCX / TXT), so Round 2 (CV-driven personal
-interview) can generate evidence-grounded questions.
+uploaded résumé (PDF / DOCX / TXT / JPG / PNG — including a phone screenshot
+of one), so Round 2 (CV-driven personal interview) can generate
+evidence-grounded questions.
 
 ## Architecture
 
@@ -71,7 +72,7 @@ in the image) — see `Dockerfile`.
 | `GET /health/ready` | readiness — models are loaded, service can actually parse (503 until then) |
 | `GET /health` | back-compat alias for `/health/live` |
 | `GET /api/v1/capabilities` | supported file types, model names, whether the transformer loaded |
-| `POST /api/v1/parse` | multipart file upload (PDF/DOCX/TXT) → `ParsedResume` JSON |
+| `POST /api/v1/parse` | multipart file upload (PDF/DOCX/TXT/JPG/PNG) → `ParsedResume` JSON |
 | `GET /metrics` | Prometheus metrics (request counts/latency histograms) |
 | `GET /docs` | interactive Swagger UI |
 
@@ -114,13 +115,15 @@ production are handled explicitly:
   instead, so every replica shares one counter. See "Verifying the
   Redis-backed rate limiter" below — this isn't just documented, it's been
   proven against a real multi-process setup.
-- **OCR fallback for scanned/image-only PDFs**: if pdfplumber finds no text
-  layer at all (a résumé that was scanned from paper, or exported as a
+- **OCR for scanned PDFs and direct image uploads**: if pdfplumber finds no
+  text layer at all in a PDF (scanned from paper, or exported as a
   flattened image), the extractor rasterizes each page with `pypdfium2` and
   runs Tesseract over it — up to `CV_PARSER_OCR_MAX_PAGES` pages (default
-  10), so one huge scanned deck can't hang a request. Like the transformer,
-  this is fail-soft: if Tesseract isn't installed, OCR is skipped with a
-  logged warning instead of crashing. The production Docker image installs
+  10), so one huge scanned deck can't hang a request. A résumé uploaded
+  directly as a JPG/PNG (e.g. a phone screenshot) skips the PDF-rendering
+  step and goes straight to the same OCR call. Like the transformer, this
+  is fail-soft: if Tesseract isn't installed, OCR is skipped with a logged
+  warning instead of crashing. The production Docker image installs
   `tesseract-ocr` so this actually works in a real deploy, not just local
   dev where it happens to already be on your PATH.
 - **Metrics**: Prometheus-format request counts and latency histograms at
@@ -160,21 +163,24 @@ python -m spacy download en_core_web_sm
 pytest tests/ -v
 ```
 
-44 tests across four files:
+53 tests across six files:
 
 - `test_pipeline.py` — contact/skills/education/experience/projects/
   certifications extraction against a realistic fixture résumé.
-- `test_extractor.py` — drives the actual PDF and DOCX code paths (built at
-  test time with `reportlab`/`python-docx`, not just the `.txt` fixture),
-  file-signature-mismatch and unsupported-type error paths, and the OCR
-  fallback against a synthetic *scanned* PDF (text rendered to an image,
-  embedded with no text layer — genuinely exercises Tesseract, not mocked).
+- `test_extractor.py` — drives the actual PDF, DOCX, JPG, and PNG code paths
+  (built at test time with `reportlab`/`python-docx`/`Pillow`, not just the
+  `.txt` fixture), file-signature-mismatch and unsupported-type error paths,
+  and OCR against both a synthetic *scanned PDF* (text rendered to an image,
+  embedded with no text layer) and a directly-uploaded screenshot image —
+  genuinely exercises Tesseract both ways, not mocked.
 - `test_api.py` — HTTP-level: health/readiness, capabilities, metrics,
   request-ID propagation, `/parse` success and every error status code
   (400/413/415/422), and that error responses never leak a traceback.
 - `test_rate_limit_redis.py` — spins up a throwaway `redis:7-alpine`
   container and proves two independent storage connections (standing in for
   two app replicas) share hit counts; skips cleanly if Docker isn't reachable.
+- `test_experience.py` — regression coverage for a bug where a company's
+  leading acronym (e.g. "IEMA RND Pvt. Ltd.") got trimmed by statistical NER.
 
 By default the transformer is disabled in tests (`conftest.py`) so the suite
 runs in ~5s; override with `CV_PARSER_ENABLE_TRANSFORMER=1 pytest tests/` to
