@@ -16,8 +16,19 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
+from rapidfuzz import fuzz, process
+
 from .ner import extract_entities
 from .schemas import ExtractionMethod, Skill, SkillCategory
+
+# Threshold picked from measured separation: real OCR misreads of a canonical
+# skill name ("fastapl" vs "fastapi") score ~86; unrelated words that just
+# happen to share some letters ("git" vs "github", "java" vs "javascript")
+# top out around 67. 84 sits safely in that gap. Tokens shorter than this are
+# excluded entirely — fuzzy ratios on very short strings ("$3" vs "s3" = 50)
+# are too noisy to trust either direction.
+_FUZZY_SKILL_THRESHOLD = 84
+_FUZZY_MIN_TOKEN_LEN = 4
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -54,8 +65,23 @@ def _canonical_lookup() -> dict[str, str]:
 
 def _normalize(name: str) -> str:
     name = name.strip().strip(".:;")
-    canonical = _canonical_lookup().get(name.lower())
-    return canonical or name
+    lname = name.lower()
+    canonical = _canonical_lookup().get(lname)
+    if canonical:
+        return canonical
+    if len(lname) >= _FUZZY_MIN_TOKEN_LEN:
+        # Catches OCR-garbled skill tokens ("FastAPl", a lowercase-L misread
+        # of "FastAPI") by fuzzy-matching against the curated vocabulary,
+        # instead of letting them become their own separate junk skill.
+        match = process.extractOne(
+            lname,
+            _canonical_lookup().keys(),
+            scorer=fuzz.ratio,
+            score_cutoff=_FUZZY_SKILL_THRESHOLD,
+        )
+        if match:
+            return _canonical_lookup()[match[0]]
+    return name
 
 
 def _category_for(name: str) -> SkillCategory:

@@ -30,7 +30,14 @@ for canonical, aliases in _SECTION_ALIASES.items():
 
 _FUZZY_THRESHOLD = 88
 _MAX_HEADER_WORDS = 5
-_BULLET_PREFIX_RE = re.compile(r"^[•●▪\-\*‣⁃]\s*")
+# A single leading non-word, non-space character, e.g. •●▪-*‣⁃. Deliberately
+# generic rather than an exhaustive bullet-glyph whitelist: OCR reads the
+# same "•" as different symbols depending on image quality — ©, ¢, », « have
+# all been observed for the identical glyph within a single scanned/photographed
+# résumé. Anchored at line start and limited to one character, so it can't
+# match ordinary body text (which starts with a letter/digit) or a mid-word
+# hyphen like "Real-Time".
+_BULLET_PREFIX_RE = re.compile(r"^[^\w\s]\s*")
 
 
 @dataclass
@@ -124,6 +131,17 @@ def split_bullets(body: str) -> list[str]:
     return bullets
 
 
+def _merge_bullet_continuations(blocks: list[str]) -> list[str]:
+    merged: list[str] = []
+    for block in blocks:
+        first_line = block.split("\n", 1)[0].strip()
+        if merged and _BULLET_PREFIX_RE.match(first_line):
+            merged[-1] = f"{merged[-1]}\n{block}"
+        else:
+            merged.append(block)
+    return merged
+
+
 def group_entries(body: str) -> list[str]:
     """Group a multi-entry section (e.g. Experience, Education) into per-entry
     text blocks, splitting on blank lines first and falling back to date-range
@@ -131,7 +149,14 @@ def group_entries(body: str) -> list[str]:
     """
     blocks = [b.strip() for b in re.split(r"\n\s*\n", body) if b.strip()]
     if len(blocks) > 1:
-        return blocks
+        # Tesseract's OCR output inserts a blank line between essentially
+        # every visually-separated line — including a description bullet
+        # directly under its own entry's title — so a naive blank-line
+        # split treats each bullet as its own new entry. A block whose
+        # first line is bullet-prefixed is always a continuation of the
+        # previous entry, never a new one, regardless of how many blank
+        # lines the OCR text happens to have around it.
+        return _merge_bullet_continuations(blocks)
 
     # No blank-line separation available — split on lines that look like a
     # new entry's title/date line. Two résumé styles both show up in
