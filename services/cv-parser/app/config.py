@@ -32,9 +32,20 @@ class Settings(BaseSettings):
     # Empty by default (deny all cross-origin) — explicit opt-in for production.
     cors_allow_origins: str = ""
 
+    # --- OCR fallback (scanned/image-only PDFs) ----------------------------
+    enable_ocr: bool = True
+    ocr_dpi: int = 200
+    ocr_max_pages: int = 10
+
     # --- Rate limiting ----------------------------------------------------
     rate_limit_enabled: bool = True
     rate_limit_parse: str = "20/minute"
+    # Shared storage for the rate limiter, e.g. "redis://redis:6379". Unset
+    # (default) uses slowapi's in-memory store, which only enforces limits
+    # per-process — fine for a single instance, but each replica behind a
+    # load balancer would get its own independent limit. Set this once
+    # you're running more than one replica.
+    rate_limit_storage_uri: str | None = None
 
     # --- Logging ------------------------------------------------------------
     log_level: str = "INFO"

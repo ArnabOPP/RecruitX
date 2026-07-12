@@ -1,0 +1,68 @@
+# Multi-replica deployment example: two cv-parser instances behind a shared
+# Redis-backed rate limiter, fronted by nginx as a simple load balancer.
+#
+# This exists to demonstrate — and let you actually verify — the scenario
+# that in-memory rate limiting can't handle: without CV_PARSER_RATE_LIMIT_STORAGE_URI,
+# each replica enforces its limit independently, so a client could get
+# 2x (or Nx) the intended request budget by fanning out across replicas.
+# With it, both replicas share one counter in Redis.
+#
+# Run: docker compose up --build
+# Verify: hit http://localhost:8080/api/v1/parse repeatedly and watch the
+# combined limit (not per-replica) kick in — see README's "Verifying the
+# Redis-backed rate limiter" section for the exact commands.
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  cv-parser-a:
+    build: .
+    restart: unless-stopped
+    environment:
+      CV_PARSER_RATE_LIMIT_STORAGE_URI: redis://redis:6379
+      CV_PARSER_RATE_LIMIT_PARSE: "20/minute"
+      CV_PARSER_ENVIRONMENT: production
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  cv-parser-b:
+    build: .
+    restart: unless-stopped
+    environment:
+      CV_PARSER_RATE_LIMIT_STORAGE_URI: redis://redis:6379
+      CV_PARSER_RATE_LIMIT_PARSE: "20/minute"
+      CV_PARSER_ENVIRONMENT: production
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - cv-parser-a
+      - cv-parser-b

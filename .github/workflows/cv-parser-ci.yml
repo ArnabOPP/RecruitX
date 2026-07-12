@@ -50,4 +50,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build image
-        run: docker build -t cv-parser:ci services/cv-parser
+        # `defaults.run.working-directory` above already puts this step in
+        # services/cv-parser, so the build context is "." — not
+        # "services/cv-parser" again (that path-doubling is exactly what
+        # broke this job the first time it was actually run).
+        run: docker build -t cv-parser:ci .

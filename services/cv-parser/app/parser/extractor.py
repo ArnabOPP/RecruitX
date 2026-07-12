@@ -17,6 +17,9 @@ from pathlib import Path
 import docx
 import pdfplumber
 
+from ..config import get_settings
+from .ocr import get_ocr_engine
+
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 
@@ -71,10 +74,30 @@ def _extract_pdf(data: bytes) -> tuple[str, int, list[str]]:
                 continue
             lines.extend(_reconstruct_reading_order(words))
             lines.append("")
-        if page_count and not any(line.strip() for line in lines):
+
+    has_text_layer = any(line.strip() for line in lines)
+    if page_count and not has_text_layer:
+        settings = get_settings()
+        if settings.enable_ocr:
+            ocr_text, ocr_warnings = get_ocr_engine().extract_text(
+                data, max_pages=settings.ocr_max_pages
+            )
+            warnings.extend(ocr_warnings)
+            if ocr_text.strip():
+                warnings.append(
+                    "No text layer found — this appears to be a scanned/image "
+                    "PDF; text below was recovered via OCR and may contain "
+                    "recognition errors."
+                )
+                return ocr_text, page_count, warnings
+            warnings.append(
+                "No extractable text layer found and OCR did not recover any "
+                "text — this may be a scanned/image PDF."
+            )
+        else:
             warnings.append(
                 "No extractable text layer found — this may be a scanned/image "
-                "PDF that requires OCR."
+                "PDF that requires OCR (currently disabled: CV_PARSER_ENABLE_OCR=0)."
             )
     return "\n".join(lines), page_count, warnings
 

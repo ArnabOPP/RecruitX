@@ -9,10 +9,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CV_PARSER_ENVIRONMENT=production \
     HF_HOME=/srv/.cache/huggingface
 
-# Build tooling only needed transiently for compiling wheels (e.g. torch's
-# deps on some platforms); nothing here is needed at runtime.
+# curl: HEALTHCHECK below. tesseract-ocr: OCR fallback for scanned/image-only
+# PDFs (app/parser/ocr.py) — without this the feature silently degrades to
+# "no text recovered" rather than failing, but it should actually work in
+# the deployed image, not just in local dev where Tesseract happens to be
+# on the host.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

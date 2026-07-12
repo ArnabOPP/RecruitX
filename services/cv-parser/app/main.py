@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -39,7 +40,29 @@ settings = get_settings()
 configure_logging(level=settings.log_level, json_logs=settings.log_json)
 logger = logging.getLogger("cv_parser.api")
 
-limiter = Limiter(key_func=get_remote_address, enabled=settings.rate_limit_enabled)
+
+def _redact_uri(uri: str) -> str:
+    """Strip credentials before a URI ever hits a log line, e.g.
+    "redis://:secret@host:6379" -> "redis://***@host:6379"."""
+    return re.sub(r"//[^@/]*@", "//***@", uri)
+
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    enabled=settings.rate_limit_enabled,
+    # Unset -> slowapi's default in-memory store (per-process only, fine for
+    # a single instance). Set CV_PARSER_RATE_LIMIT_STORAGE_URI to a redis://
+    # URL to share limit state across replicas behind a load balancer.
+    storage_uri=settings.rate_limit_storage_uri,
+    # If Redis is momentarily unreachable, fail open (allow the request)
+    # rather than 500ing every request in the outage — a rate limiter that's
+    # down shouldn't take the whole API down with it.
+    in_memory_fallback_enabled=True,
+)
+if settings.rate_limit_storage_uri:
+    logger.info("Rate limiter using shared storage: %s", _redact_uri(settings.rate_limit_storage_uri))
+else:
+    logger.info("Rate limiter using in-memory storage (single-instance only).")
 
 
 @asynccontextmanager

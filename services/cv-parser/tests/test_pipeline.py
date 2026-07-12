@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from app.parser.pipeline import parse_resume
 from app.parser.extractor import EmptyDocumentError, UnsupportedFileTypeError
+from app.parser.pipeline import parse_resume
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
