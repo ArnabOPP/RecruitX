@@ -1,0 +1,13 @@
+{
+  "summary": ["summary", "objective", "profile", "about me", "career objective", "professional summary"],
+  "education": ["education", "academic background", "academic qualifications", "educational qualifications", "qualifications"],
+  "experience": ["experience", "work experience", "professional experience", "employment history", "work history", "career history", "internships", "internship experience"],
+  "projects": ["projects", "academic projects", "personal projects", "key projects", "personal & academic projects"],
+  "skills": ["skills", "technical skills", "core competencies", "key skills", "skill set", "technologies", "tech stack"],
+  "certifications": ["certifications", "certificates", "licenses & certifications", "courses & certifications"],
+  "achievements": ["achievements", "awards", "honors", "accomplishments", "awards & honors", "awards & open source", "awards and open source"],
+  "publications": ["publications", "research", "research papers"],
+  "extracurricular": ["extracurricular", "activities", "volunteering", "leadership & activities", "positions of responsibility"],
+  "languages": ["languages", "spoken languages"],
+  "contact": ["contact", "contact information", "personal details"]
+}

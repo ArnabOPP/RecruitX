@@ -1,0 +1,17 @@
+{
+  "bachelor": [
+    "B.Tech", "BTech", "B.E.", "BE", "Bachelor of Technology", "Bachelor of Engineering",
+    "B.Sc", "BSc", "Bachelor of Science", "B.A.", "BA", "Bachelor of Arts",
+    "B.Com", "BCom", "Bachelor of Commerce", "BBA", "Bachelor of Business Administration",
+    "B.C.A", "BCA", "Bachelor of Computer Applications", "LLB", "Bachelor of Laws"
+  ],
+  "master": [
+    "M.Tech", "MTech", "M.E.", "ME", "Master of Technology", "Master of Engineering",
+    "M.Sc", "MSc", "Master of Science", "M.A.", "MA", "Master of Arts",
+    "MBA", "Master of Business Administration", "M.C.A", "MCA",
+    "Master of Computer Applications", "M.Com", "MCom", "LLM", "Master of Laws"
+  ],
+  "doctorate": ["Ph.D", "PhD", "Doctor of Philosophy", "D.Phil"],
+  "diploma": ["Diploma", "Post Graduate Diploma", "PGDM", "PG Diploma"],
+  "secondary": ["Class XII", "12th", "HSC", "Higher Secondary", "Class X", "10th", "SSC"]
+}

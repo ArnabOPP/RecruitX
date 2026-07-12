@@ -1,0 +1,47 @@
+Aarav Sharma
+aarav.sharma@email.com | +91 98765 43210
+linkedin.com/in/aaravsharma | github.com/aaravsharma
+
+SUMMARY
+Final-year Computer Science undergraduate with strong foundations in data
+structures, algorithms, and full-stack web development. Seeking an SDE role.
+
+EDUCATION
+B.Tech in Computer Science, VIT Vellore
+2022 - 2026
+CGPA: 8.7/10
+
+Class XII, Delhi Public School
+2020 - 2022
+Percentage: 92%
+
+SKILLS
+Languages: Python, Java, JavaScript, TypeScript, SQL
+Frameworks: React, Node.js, Express, Django, FastAPI
+Databases: MongoDB, PostgreSQL, Redis
+Cloud & DevOps: AWS, Docker, Kubernetes, Git
+Other: Machine Learning, REST APIs, Agile
+
+PROJECTS
+Recruitix Mock Interview Platform (React, FastAPI, PostgreSQL)
+2025 - Present
+Built a full-stack mock interview platform with biometric face login using
+OpenCV and MediaPipe. Implemented a spaCy-based résumé parser to extract
+skills and generate CV-grounded interview questions via an LLM.
+github.com/aaravsharma/recruitix
+
+Real-Time Chat Application (Node.js, Socket.io, MongoDB)
+2024
+Developed a real-time chat app supporting group messaging and file sharing
+with JWT authentication and Redis-backed presence tracking.
+
+EXPERIENCE
+Software Engineering Intern at Flipkart
+Jun 2025 - Aug 2025
+- Built internal tooling in Python and Django to automate inventory reports.
+- Optimized PostgreSQL queries, reducing report generation time by 40%.
+- Collaborated with a team of 5 engineers using Agile/Scrum.
+
+CERTIFICATIONS
+AWS Certified Cloud Practitioner - Amazon Web Services, 2025
+Deep Learning Specialization - Coursera, 2024

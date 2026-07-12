@@ -1,0 +1,58 @@
+{
+  "programming_language": [
+    "Python", "Java", "JavaScript", "TypeScript", "C", "C++", "C#", "Go", "Golang",
+    "Rust", "Kotlin", "Swift", "Ruby", "PHP", "Scala", "R", "MATLAB", "Perl",
+    "Dart", "Lua", "Haskell", "Elixir", "Clojure", "Objective-C", "Shell Scripting",
+    "Bash", "PowerShell", "SQL", "Assembly", "VBA", "Groovy", "Julia"
+  ],
+  "framework_library": [
+    "React", "React.js", "Angular", "Vue.js", "Vue", "Next.js", "Nuxt.js", "Svelte",
+    "Node.js", "Express.js", "Express", "Django", "Flask", "FastAPI", "Spring",
+    "Spring Boot", "Hibernate", ".NET", "ASP.NET", "Laravel", "Ruby on Rails",
+    "jQuery", "Redux", "Zustand", "GraphQL", "Apollo", "Tailwind CSS", "Bootstrap",
+    "Material UI", "shadcn/ui", "Framer Motion", "Three.js", "D3.js", "Webpack",
+    "Vite", "Babel", "ESLint", "Jest", "Mocha", "Cypress", "Selenium", "Playwright",
+    "JUnit", "PyTest", "NumPy", "Pandas", "SciPy", "Matplotlib", "Seaborn",
+    "Scikit-learn", "TensorFlow", "PyTorch", "Keras", "OpenCV", "Hugging Face",
+    "Transformers", "spaCy", "NLTK", "LangChain", "LlamaIndex"
+  ],
+  "database": [
+    "MySQL", "PostgreSQL", "MongoDB", "SQLite", "Redis", "Cassandra", "Oracle",
+    "MariaDB", "Firebase", "Firestore", "DynamoDB", "Elasticsearch", "Neo4j",
+    "Supabase", "CockroachDB", "InfluxDB", "Couchbase", "MS SQL Server"
+  ],
+  "cloud_devops": [
+    "AWS", "Amazon Web Services", "Azure", "Google Cloud Platform", "GCP", "Docker",
+    "Kubernetes", "Terraform", "Ansible", "Jenkins", "GitHub Actions", "GitLab CI",
+    "CircleCI", "CI/CD", "Vercel", "Netlify", "Heroku", "Nginx", "Apache",
+    "Linux", "Unix", "Prometheus", "Grafana", "ELK Stack", "Helm", "EC2", "S3",
+    "Lambda", "Cloudflare", "Serverless"
+  ],
+  "data_ml": [
+    "Machine Learning", "Deep Learning", "Natural Language Processing", "NLP",
+    "Computer Vision", "Data Analysis", "Data Science", "Data Engineering",
+    "Big Data", "Apache Spark", "Hadoop", "Kafka", "Airflow", "ETL",
+    "Reinforcement Learning", "Neural Networks", "Generative AI", "LLM",
+    "Large Language Models", "Statistics", "A/B Testing", "Feature Engineering",
+    "Model Deployment", "MLOps", "Time Series Analysis", "Recommendation Systems"
+  ],
+  "tool_platform": [
+    "Git", "GitHub", "GitLab", "Bitbucket", "Jira", "Confluence", "Postman",
+    "Figma", "Adobe XD", "Sketch", "VS Code", "IntelliJ IDEA", "Eclipse",
+    "Notion", "Slack", "Trello", "Excel", "Power BI", "Tableau", "Looker"
+  ],
+  "soft_skill": [
+    "Leadership", "Communication", "Teamwork", "Problem Solving", "Critical Thinking",
+    "Time Management", "Adaptability", "Collaboration", "Public Speaking",
+    "Mentoring", "Project Management", "Agile", "Scrum", "Stakeholder Management",
+    "Conflict Resolution", "Decision Making", "Creativity", "Negotiation"
+  ],
+  "domain_knowledge": [
+    "Object-Oriented Programming", "OOP", "Data Structures", "Algorithms",
+    "System Design", "Microservices", "REST API", "RESTful APIs", "gRPC",
+    "Design Patterns", "Distributed Systems", "Operating Systems",
+    "Computer Networks", "Cybersecurity", "Blockchain", "DevOps",
+    "Test-Driven Development", "TDD", "Software Architecture",
+    "Database Design", "Cryptography", "Web Security", "OWASP"
+  ]
+}
