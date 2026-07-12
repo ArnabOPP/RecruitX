@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from .dates import MONTH_RE, estimate_years_between, find_date_range
-from .ner import extract_entities
+from .ner import EntitySpan, extract_entities
 from .schemas import ConfidentField, ExperienceEntry, ExtractionMethod, SourceSpan
 from .sections import group_entries, split_bullets
 from .skills import extract_skills_from_gazetteer
@@ -18,6 +18,10 @@ _ROLE_HINT_RE = re.compile(
     re.I,
 )
 _DATE_TAIL_RE = re.compile(rf"\s*\(?(?:{MONTH_RE}\.?\s+)?\b(19|20)\d{{2}}\b.*$", re.I)
+# A leading acronym/word NER may have missed as part of an org name — e.g.
+# statistical NER tags "RND Pvt. Ltd." in "IEMA RND Pvt. Ltd." but drops the
+# "IEMA" prefix, since it doesn't recognize the acronym as part of the name.
+_NAME_PREFIX_WORD_RE = re.compile(r"^[A-Z][A-Za-z&.]{0,15}$")
 
 
 def extract_experience(section_body: str) -> list[ExperienceEntry]:
@@ -59,6 +63,25 @@ def _parse_entry(block: str) -> ExperienceEntry:
     )
 
 
+def _expand_missed_name_prefix(scope_text: str, org_ent: EntitySpan) -> str:
+    """spaCy's statistical NER sometimes tags only the recognizable tail of
+    a company name (e.g. "RND Pvt. Ltd." out of "IEMA RND Pvt. Ltd.") because
+    it doesn't recognize a leading acronym as part of the entity. If the text
+    immediately before the matched span is a short run of capitalized
+    words/acronyms with no clause boundary (comma) in between, treat it as
+    a missed prefix and prepend it rather than trusting the NER span as-is.
+    """
+    prefix = scope_text[: org_ent.start_char].strip(" -–,|")
+    if not prefix or "," in prefix:
+        return org_ent.text
+    words = prefix.split()
+    if not words or len(words) > 3:
+        return org_ent.text
+    if all(_NAME_PREFIX_WORD_RE.match(w) for w in words):
+        return f"{prefix} {org_ent.text}"
+    return org_ent.text
+
+
 def _parse_role_and_org(header_line: str, block: str) -> tuple[ConfidentField | None, ConfidentField | None]:
     parts = _TITLE_ORG_SEP_RE.split(header_line, maxsplit=1)
     role_field = None
@@ -79,16 +102,17 @@ def _parse_role_and_org(header_line: str, block: str) -> tuple[ConfidentField | 
     # "<Role> - <Org>, <Location> <dates>" tends to greedily tag "<Role> -
     # <Org>" as one ORG span, re-introducing the exact garbling the dash
     # split above was meant to fix.
-    ner_scope = org_field.value if org_field else header_line
-    entities = extract_entities(ner_scope[:300])
+    ner_scope = (org_field.value if org_field else header_line)[:300]
+    entities = extract_entities(ner_scope)
     org_ent = next((e for e in entities if e.label == "ORG"), None)
     if (
         org_ent
         and not _ROLE_HINT_RE.search(org_ent.text)
         and (not org_field or org_ent.confidence > org_field.confidence)
     ):
+        org_name = _expand_missed_name_prefix(ner_scope, org_ent)
         org_field = ConfidentField(
-            value=org_ent.text,
+            value=org_name,
             confidence=org_ent.confidence,
             method=ExtractionMethod.ENSEMBLE if org_ent.method == "ensemble" else ExtractionMethod.TRANSFORMER_NER,
             source=SourceSpan(section="experience", text=block[:200]),

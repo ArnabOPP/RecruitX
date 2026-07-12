@@ -258,10 +258,6 @@ Dockerfile that looks plausible on paper.
   `en_core_web_trf` (spaCy's own transformer pipeline) improves PERSON/ORG
   recall further at the cost of latency — worth an A/B on real résumé
   volume before Phase 2.
-- Org/company extraction can occasionally trim a legitimate acronym prefix
-  (e.g. "IEMA RND Pvt. Ltd." → "RND Pvt. Ltd.") when the statistical NER
-  model doesn't recognize the acronym — a known precision/recall tradeoff,
-  not yet resolved.
 - OCR accuracy depends entirely on scan quality; Tesseract's general English
   model isn't fine-tuned on résumés specifically, so a low-quality scan will
   produce noisier text than a native-text PDF. `CV_PARSER_OCR_DPI` trades
