@@ -1,0 +1,16 @@
+# Runtime dependencies, pinned for reproducible builds.
+# To upgrade: bump deliberately, then re-run `pytest` + `mypy` + `ruff check`.
+
+fastapi==0.139.0
+uvicorn[standard]==0.50.0
+python-multipart==0.0.32
+pydantic==2.13.2
+pydantic-settings==2.12.0
+python-dotenv==1.2.1
+
+groq==1.5.0
+edge-tts==7.2.8
+
+slowapi==0.1.10
+prometheus-fastapi-instrumentator==8.0.2
+redis==8.0.1
