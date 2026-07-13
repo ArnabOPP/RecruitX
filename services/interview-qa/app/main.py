@@ -31,6 +31,7 @@ from .config import get_settings
 from .errors import ErrorResponse
 from .llm.client import LLMAuthenticationError, LLMError, get_llm_client
 from .logging_config import configure_logging, request_id_var
+from .middleware import MaxBodySizeMiddleware
 from .qa.followup import FollowUpGenerationError, generate_followup
 from .qa.generator import QuestionGenerationError, generate_questions
 from .qa.schemas import (
@@ -130,6 +131,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rejects oversized bodies before FastAPI parses them into memory.
+app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
+
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -143,6 +147,9 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# Added last so it's outermost (Starlette runs the most-recently-added
+# middleware first) — request_id_var must be set before MaxBodySizeMiddleware
+# runs, so its error responses carry a request_id like every other error.
 app.add_middleware(RequestIdMiddleware)
 
 if settings.metrics_enabled:

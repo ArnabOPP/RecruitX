@@ -114,6 +114,7 @@ is the mechanism directly verified in testing — see `tests/test_live_groq.py`.
 | `INTERVIEW_QA_MAX_QUESTIONS_PER_REQUEST` | `10` | cap on `count` |
 | `INTERVIEW_QA_MAX_RESUME_CONTEXT_CHARS` | `20000` | caps the rendered résumé context sent to the LLM — no résumé field has its own length limit, so this bounds prompt cost/size regardless of which field a caller stuffs with a huge payload |
 | `INTERVIEW_QA_MAX_FOLLOWUP_FIELD_CHARS` | `4000` | caps `original_question` and `candidate_answer` on `/followup` — `candidate_answer` is free-text user input with no upstream parsing step, the same exposure as an oversized résumé |
+| `INTERVIEW_QA_MAX_REQUEST_BODY_BYTES` | `512000` | rejects the raw request body via `Content-Length` before FastAPI parses it — the field-level char caps above only bound what reaches the LLM prompt, not the cost of parsing an oversized body (e.g. a résumé with 500,000 tiny list entries) in the first place |
 | `INTERVIEW_QA_RATE_LIMIT_PARSE` \* | `20/minute` | see below |
 | `INTERVIEW_QA_RATE_LIMIT_STORAGE_URI` | unset | e.g. `redis://host:6379` to share the limit across replicas — verified with a real Redis container and two live server instances alternating requests against a shared combined limit, see `tests/test_rate_limit_redis.py` |
 | `INTERVIEW_QA_REQUIRE_API_KEY` | `0` | require an `X-API-Key` header on `/api/v1/questions/*` — off by default for local dev/tests, **must be turned on before any internet-reachable deploy** so an unauthenticated caller can't burn this service's Groq quota |
@@ -130,7 +131,7 @@ pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-49 tests across eight files:
+56 tests across nine files:
 
 - `test_generator.py` / `test_followup.py` — unit tests against a fake LLM
   client (scripted responses, including malformed JSON to exercise the
@@ -154,6 +155,10 @@ pytest tests/ -v
 - `test_prompts.py` — confirms an oversized résumé context, follow-up
   question, or candidate answer is truncated to its configured limit
   before it reaches the LLM prompt.
+- `test_body_size_limit.py` — `MaxBodySizeMiddleware` rejects an oversized
+  request body (413) or one missing `Content-Length` (411) before it's
+  parsed, tested against a standalone app to avoid polluting the shared
+  `app.main` module's settings across test files.
 
 ## Deployment
 

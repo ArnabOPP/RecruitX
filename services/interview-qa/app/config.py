@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     # separately since a spoken interview answer is naturally much shorter
     # than a full résumé.
     max_followup_field_chars: int = 4_000
+    # Field-level truncation above only bounds what reaches the LLM prompt
+    # — by the time that code runs, FastAPI has already fully parsed the
+    # JSON body into memory (e.g. a résumé with 500,000 tiny skill entries
+    # costs real CPU/memory regardless of the final string being
+    # truncated). This caps the raw request body itself, rejected before
+    # parsing even starts.
+    max_request_body_bytes: int = 512_000
     request_timeout_seconds: float = 45.0
 
     # --- Inbound auth (protects the Groq quota this service spends) --------
