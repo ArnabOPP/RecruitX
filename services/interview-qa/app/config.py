@@ -47,6 +47,12 @@ class Settings(BaseSettings):
 
     # --- Upload/request limits -----------------------------------------------
     max_resume_context_chars: int = 20_000
+    # original_question / candidate_answer are free-text, directly
+    # attacker-controlled input with no résumé-parsing step in between —
+    # same prompt-cost/DoS exposure as an oversized résumé, capped
+    # separately since a spoken interview answer is naturally much shorter
+    # than a full résumé.
+    max_followup_field_chars: int = 4_000
     request_timeout_seconds: float = 45.0
 
     # --- Inbound auth (protects the Groq quota this service spends) --------

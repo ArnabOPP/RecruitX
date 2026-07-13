@@ -34,6 +34,12 @@ _FOLLOWUP_JSON_SHAPE = """{
 }"""
 
 
+def _truncate(text: str, max_chars: int, label: str) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n... [{label} truncated]"
+
+
 def _format_resume_context(resume: ResumeContext) -> str:
     """Render the résumé as a compact, natural-language brief for the
     prompt — not a raw JSON dump, which wastes tokens on schema noise the
@@ -89,11 +95,7 @@ def _format_resume_context(resume: ResumeContext) -> str:
     # has a length cap) — truncating here bounds both the Groq request
     # cost and the risk of blowing past the model's context window,
     # regardless of which field the bulk came from.
-    max_chars = get_settings().max_resume_context_chars
-    if len(text) > max_chars:
-        text = text[:max_chars] + "\n... [résumé context truncated]"
-
-    return text
+    return _truncate(text, get_settings().max_resume_context_chars, "résumé context")
 
 
 def build_generation_prompt(
@@ -155,10 +157,11 @@ def build_followup_prompt(
         "Respond with a single JSON object and nothing else, in exactly this shape:\n"
         f"{_FOLLOWUP_JSON_SHAPE}"
     )
+    max_field_chars = get_settings().max_followup_field_chars
     user = (
         f"{company_line}\n\n"
         f"Résumé:\n{_format_resume_context(resume)}\n\n"
-        f"Original question: {original_question}\n"
-        f"Candidate's answer: {candidate_answer}"
+        f"Original question: {_truncate(original_question, max_field_chars, 'question')}\n"
+        f"Candidate's answer: {_truncate(candidate_answer, max_field_chars, 'answer')}"
     )
     return system, user

@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from app.config import get_settings
-from app.qa.prompts import build_generation_prompt
+from app.qa.prompts import build_followup_prompt, build_generation_prompt
 from app.qa.schemas import ProjectContext, ResumeContext, RoundType
 
 
@@ -47,3 +47,44 @@ def test_resume_context_under_limit_is_not_truncated(monkeypatch):
 
     assert "[résumé context truncated]" not in user
     assert "Small Project" in user
+
+
+def test_followup_candidate_answer_is_truncated_to_configured_limit(monkeypatch):
+    """candidate_answer is free-text, directly attacker-controlled input
+    with no résumé-parsing step in between — same cost/DoS exposure as an
+    oversized résumé, so it needs its own cap."""
+    monkeypatch.setenv("INTERVIEW_QA_MAX_FOLLOWUP_FIELD_CHARS", "200")
+    get_settings.cache_clear()
+
+    huge_answer = "y" * 20_000
+    resume = ResumeContext(full_name="Jordan Lee")
+
+    _system, user = build_followup_prompt(resume, "Tell me about your project.", huge_answer, RoundType.PERSONAL, None)
+
+    assert huge_answer not in user
+    assert "[answer truncated]" in user
+
+
+def test_followup_original_question_is_truncated_to_configured_limit(monkeypatch):
+    monkeypatch.setenv("INTERVIEW_QA_MAX_FOLLOWUP_FIELD_CHARS", "200")
+    get_settings.cache_clear()
+
+    huge_question = "z" * 20_000
+    resume = ResumeContext(full_name="Jordan Lee")
+
+    _system, user = build_followup_prompt(resume, huge_question, "A short answer.", RoundType.PERSONAL, None)
+
+    assert huge_question not in user
+    assert "[question truncated]" in user
+
+
+def test_followup_fields_under_limit_are_not_truncated(monkeypatch):
+    monkeypatch.setenv("INTERVIEW_QA_MAX_FOLLOWUP_FIELD_CHARS", "4000")
+    get_settings.cache_clear()
+
+    resume = ResumeContext(full_name="Jordan Lee")
+    _system, user = build_followup_prompt(resume, "Tell me about your project.", "I built a web app.", RoundType.PERSONAL, None)
+
+    assert "[question truncated]" not in user
+    assert "[answer truncated]" not in user
+    assert "I built a web app." in user
