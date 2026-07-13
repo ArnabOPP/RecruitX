@@ -15,7 +15,13 @@ import json
 import logging
 
 from ..config import get_settings
-from ..llm.client import LLMClient, LLMError, get_llm_client
+from ..llm.client import (
+    LLMAuthenticationError,
+    LLMClient,
+    LLMError,
+    generate_json_with_backoff,
+    get_llm_client,
+)
 from .prompts import build_generation_prompt
 from .schemas import (
     Difficulty,
@@ -46,11 +52,20 @@ def generate_questions(
     last_error: Exception | None = None
     for attempt in range(settings.llm_max_retries + 1):
         try:
-            raw = client.generate_json(system, user)
+            # generate_json_with_backoff already retries internally on rate
+            # limits (with backoff) and transient provider errors — this
+            # outer loop's job is retrying when the call *succeeded* but
+            # produced unusable content (bad JSON, wrong schema).
+            raw = generate_json_with_backoff(client, system, user, max_retries=settings.llm_max_retries)
             data = json.loads(raw)
             questions_raw = data["questions"]
             if not isinstance(questions_raw, list):
                 raise ValueError("'questions' was not a list")
+        except LLMAuthenticationError as exc:
+            # Bad credentials won't fix themselves between attempts — fail
+            # immediately instead of burning the whole retry budget on
+            # something retrying can never resolve.
+            raise QuestionGenerationError(f"LLM provider rejected our credentials: {exc}") from exc
         except (json.JSONDecodeError, KeyError, ValueError, LLMError) as exc:
             last_error = exc
             logger.warning("Question generation attempt %d/%d failed: %s", attempt + 1, settings.llm_max_retries + 1, exc)

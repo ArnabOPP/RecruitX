@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     # recovers, since a fresh sample is usually well-formed.
     llm_max_retries: int = 2
     llm_request_timeout_seconds: float = 30.0
+    # A missing key is obviously invalid, but a *present but wrong/revoked*
+    # key would previously only surface on the first real request — this
+    # makes startup confirm the key actually works with one cheap,
+    # token-free call, so /health/ready means "will actually work", not
+    # just "a key is configured". Costs one lightweight request per
+    # process start; disable if that's undesirable (e.g. very frequent
+    # restarts against a rate-limited provider).
+    validate_key_on_startup: bool = True
 
     # --- Question generation ------------------------------------------------
     max_questions_per_request: int = 10
@@ -40,6 +48,12 @@ class Settings(BaseSettings):
     # --- Upload/request limits -----------------------------------------------
     max_resume_context_chars: int = 20_000
     request_timeout_seconds: float = 45.0
+
+    # --- Inbound auth (protects the Groq quota this service spends) --------
+    # Off by default for local dev / tests; the README and Dockerfile call
+    # out that this must be turned on before any internet-reachable deploy.
+    require_api_key: bool = False
+    api_keys: str = ""  # comma-separated shared secrets, checked against X-API-Key
 
     # --- CORS -----------------------------------------------------------
     cors_allow_origins: str = ""

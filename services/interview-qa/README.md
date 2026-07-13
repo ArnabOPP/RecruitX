@@ -109,10 +109,13 @@ is the mechanism directly verified in testing — see `tests/test_live_groq.py`.
 | `INTERVIEW_QA_GROQ_API_KEY` | *(required)* | Groq API key — free at console.groq.com |
 | `INTERVIEW_QA_GROQ_MODEL` | `llama-3.3-70b-versatile` | any Groq-hosted model |
 | `INTERVIEW_QA_LLM_TEMPERATURE` | `0.6` | generation randomness |
-| `INTERVIEW_QA_LLM_MAX_RETRIES` | `2` | retries on malformed JSON / provider error |
+| `INTERVIEW_QA_LLM_MAX_RETRIES` | `2` | retries on malformed JSON / provider error / rate limit (`generate_json_with_backoff` respects Groq's `Retry-After` header, falling back to exponential backoff) |
+| `INTERVIEW_QA_VALIDATE_KEY_ON_STARTUP` | `1` | makes a cheap, token-free `models.list()` call at startup so `/health/ready` means "the key actually works", not just "a key is present" — a configured-but-revoked key now reports not-ready instead of only failing on the first real request |
 | `INTERVIEW_QA_MAX_QUESTIONS_PER_REQUEST` | `10` | cap on `count` |
 | `INTERVIEW_QA_RATE_LIMIT_PARSE` \* | `20/minute` | see below |
-| `INTERVIEW_QA_RATE_LIMIT_STORAGE_URI` | unset | e.g. `redis://host:6379` to share the limit across replicas |
+| `INTERVIEW_QA_RATE_LIMIT_STORAGE_URI` | unset | e.g. `redis://host:6379` to share the limit across replicas — verified with a real Redis container and two live server instances alternating requests against a shared combined limit, see `tests/test_rate_limit_redis.py` |
+| `INTERVIEW_QA_REQUIRE_API_KEY` | `0` | require an `X-API-Key` header on `/api/v1/questions/*` — off by default for local dev/tests, **must be turned on before any internet-reachable deploy** so an unauthenticated caller can't burn this service's Groq quota |
+| `INTERVIEW_QA_API_KEYS` | empty | comma-separated shared secrets accepted by `X-API-Key`; required if `INTERVIEW_QA_REQUIRE_API_KEY=1` (fails closed with 503 if left empty) |
 | `INTERVIEW_QA_CORS_ALLOW_ORIGINS` | empty | comma-separated allowlist; empty denies all cross-origin |
 | `INTERVIEW_QA_LOG_LEVEL` / `INTERVIEW_QA_LOG_JSON` | `INFO` / `1` | logging |
 
@@ -125,7 +128,7 @@ pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-27 tests across four files:
+45 tests across seven files:
 
 - `test_generator.py` / `test_followup.py` — unit tests against a fake LLM
   client (scripted responses, including malformed JSON to exercise the
@@ -137,6 +140,15 @@ pytest tests/ -v
   follow-ups react to answer content. Skips cleanly if
   `INTERVIEW_QA_GROQ_API_KEY` isn't set (e.g. in CI), the same pattern
   cv-parser uses for its Tesseract/Docker-gated tests.
+- `test_llm_client.py` — `generate_json_with_backoff`'s rate-limit retry
+  behavior, including a timing-based assertion that it genuinely sleeps
+  between retries, and that auth errors fail fast without wasting retries.
+- `test_auth.py` — `verify_api_key` across all branches: disabled by
+  default, missing/wrong/correct key, multiple configured keys, and the
+  fail-closed case (required but misconfigured).
+- `test_rate_limit_redis.py` — real `redis:7-alpine` Docker container,
+  proving two independent storage connections (standing in for two app
+  replicas) share hit counts. Skips cleanly if Docker isn't available.
 
 ## Deployment
 
@@ -151,14 +163,22 @@ this service, not just reviewed.
 
 ## Known limitations
 
-- Groq's free tier has rate limits that aren't under this service's control
-  — a real traffic spike would need either a paid Groq tier or the
-  self-hosted Ollama path described above.
+- Groq's free tier has rate limits that aren't under this service's control.
+  `generate_json_with_backoff` respects Groq's `Retry-After` header (falling
+  back to exponential backoff) so transient 429s self-heal, but a sustained
+  traffic spike would still need either a paid Groq tier or the self-hosted
+  Ollama path described above.
 - No caching of generated questions — every request is a fresh LLM call.
   Fine for the current use case (each candidate's session is unique), but
   worth revisiting if cost/latency becomes a concern at scale.
 - The "probes unevidenced skills" behavior is a property of the prompt and
   the model's instruction-following, not a hard guarantee — `test_live_groq.py`
   checks it's *plausible*, not deterministic, since it's calling a real LLM.
-- Rate limiting is in-memory by default (single-instance only), same
-  Redis-backed opt-in pattern as cv-parser via `INTERVIEW_QA_RATE_LIMIT_STORAGE_URI`.
+- Rate limiting is in-memory by default (single-instance only); set
+  `INTERVIEW_QA_RATE_LIMIT_STORAGE_URI` to share it across replicas via
+  Redis — verified with a real Redis container and two live server
+  instances (see `test_rate_limit_redis.py`).
+- Inbound auth (`INTERVIEW_QA_REQUIRE_API_KEY`) is a single shared-secret
+  header, not per-user auth — sufficient to stop unauthenticated quota abuse
+  until a real gateway/auth service sits in front of Recruitix's
+  microservices, not a substitute for one.

@@ -156,3 +156,22 @@ def test_error_responses_never_leak_tracebacks(client):
     body = resp.json()
     assert "Traceback" not in body["detail"]
     assert 'File "' not in body["detail"]
+
+
+def test_readiness_reflects_invalid_credentials_not_just_missing(monkeypatch):
+    """A configured-but-wrong/revoked key must report not-ready, distinct
+    from the "no key at all" case — this is what startup key validation
+    (config.validate_key_on_startup) actually buys over just checking the
+    key string is non-empty."""
+    from tests.fakes import AlwaysUnauthenticatedLLMClient
+
+    monkeypatch.setattr("app.main.get_llm_client", lambda: AlwaysUnauthenticatedLLMClient())
+    from app.main import app
+
+    with TestClient(app) as c:
+        resp = c.get("/health/ready")
+        assert resp.status_code == 503
+        assert resp.json()["status"] == "not_ready"
+
+        caps = c.get("/api/v1/capabilities")
+        assert caps.json()["llm_ready"] is False

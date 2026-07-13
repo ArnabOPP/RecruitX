@@ -16,7 +16,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -26,9 +26,10 @@ from slowapi.util import get_remote_address
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from .auth import verify_api_key
 from .config import get_settings
 from .errors import ErrorResponse
-from .llm.client import LLMError, get_llm_client
+from .llm.client import LLMAuthenticationError, LLMError, get_llm_client
 from .logging_config import configure_logging, request_id_var
 from .qa.followup import FollowUpGenerationError, generate_followup
 from .qa.generator import QuestionGenerationError, generate_questions
@@ -65,9 +66,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Validating LLM provider configuration (provider=%s)...", settings.llm_provider)
     try:
         client = get_llm_client()
+        if settings.validate_key_on_startup:
+            # A non-empty key isn't the same as a *working* key — this makes
+            # one cheap, token-free call to actually confirm the provider
+            # accepts it, so readiness means "will actually work" rather
+            # than just "something is configured".
+            client.validate()
+            logger.info("LLM credentials confirmed valid by provider.")
         app.state.ready = True
         app.state.llm_model = client.model_name
         logger.info("LLM client ready (model=%s). Service ready.", client.model_name)
+    except LLMAuthenticationError as exc:
+        app.state.ready = False
+        app.state.llm_model = None
+        logger.error("LLM provider rejected the configured credentials: %s", exc)
     except LLMError as exc:
         # Fail loud in logs but don't crash the process — /health/ready
         # will correctly report 503 until this is fixed (e.g. a missing
@@ -181,8 +193,15 @@ def capabilities(request: Request) -> dict:
 @app.post(
     "/api/v1/questions/generate",
     response_model=GenerateQuestionsResponse,
-    responses={422: {"model": ErrorResponse}, 429: {"model": ErrorResponse}, 502: {"model": ErrorResponse}, 504: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
+        502: {"model": ErrorResponse},
+        504: {"model": ErrorResponse},
+    },
     tags=["questions"],
+    dependencies=[Depends(verify_api_key)],
 )
 @limiter.limit(settings.rate_limit_generate)
 async def generate_questions_endpoint(request: Request, body: GenerateQuestionsRequest) -> GenerateQuestionsResponse:
@@ -206,8 +225,14 @@ async def generate_questions_endpoint(request: Request, body: GenerateQuestionsR
 @app.post(
     "/api/v1/questions/followup",
     response_model=FollowUpResponse,
-    responses={429: {"model": ErrorResponse}, 502: {"model": ErrorResponse}, 504: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
+        502: {"model": ErrorResponse},
+        504: {"model": ErrorResponse},
+    },
     tags=["questions"],
+    dependencies=[Depends(verify_api_key)],
 )
 @limiter.limit(settings.rate_limit_generate)
 async def generate_followup_endpoint(request: Request, body: FollowUpRequest) -> FollowUpResponse:

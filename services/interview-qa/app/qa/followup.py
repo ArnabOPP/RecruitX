@@ -8,7 +8,13 @@ import json
 import logging
 
 from ..config import get_settings
-from ..llm.client import LLMClient, LLMError, get_llm_client
+from ..llm.client import (
+    LLMAuthenticationError,
+    LLMClient,
+    LLMError,
+    generate_json_with_backoff,
+    get_llm_client,
+)
 from .prompts import build_followup_prompt
 from .schemas import FollowUpRequest, FollowUpResponse
 
@@ -34,7 +40,7 @@ def generate_followup(request: FollowUpRequest, client: LLMClient | None = None)
     last_error: Exception | None = None
     for attempt in range(settings.llm_max_retries + 1):
         try:
-            raw = client.generate_json(system, user)
+            raw = generate_json_with_backoff(client, system, user, max_retries=settings.llm_max_retries)
             data = json.loads(raw)
             question = data["follow_up_question"]
             if not question or not isinstance(question, str):
@@ -45,6 +51,8 @@ def generate_followup(request: FollowUpRequest, client: LLMClient | None = None)
                 rationale=str(rationale).strip(),
                 model_used=client.model_name,
             )
+        except LLMAuthenticationError as exc:
+            raise FollowUpGenerationError(f"LLM provider rejected our credentials: {exc}") from exc
         except (json.JSONDecodeError, KeyError, ValueError, LLMError) as exc:
             last_error = exc
             logger.warning(
