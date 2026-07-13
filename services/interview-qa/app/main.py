@@ -61,8 +61,24 @@ else:
     logger.info("Rate limiter using in-memory storage (single-instance only).")
 
 
+def _warn_if_unprotected_in_production(settings) -> None:  # noqa: ANN001
+    """Auth is opt-in (off by default for local dev/tests), which means a
+    deploy that forgets to set INTERVIEW_QA_REQUIRE_API_KEY ships with its
+    Groq quota reachable by anyone. This doesn't block startup — "production"
+    is a self-reported setting, not a guarantee this is really
+    internet-facing — but it must be loud in logs rather than silent."""
+    if settings.is_production and not settings.require_api_key:
+        logger.warning(
+            "SECURITY: environment=production but INTERVIEW_QA_REQUIRE_API_KEY is not set. "
+            "This service's endpoints are unauthenticated and its Groq quota is exposed to "
+            "any caller who can reach them. Set INTERVIEW_QA_REQUIRE_API_KEY=1 and "
+            "INTERVIEW_QA_API_KEYS before deploying this internet-reachable."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    _warn_if_unprotected_in_production(settings)
     logger.info("Validating LLM provider configuration (provider=%s)...", settings.llm_provider)
     try:
         client = get_llm_client()

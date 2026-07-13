@@ -10,6 +10,7 @@ than generic interview-question filler any candidate could be asked.
 
 from __future__ import annotations
 
+from ..config import get_settings
 from .schemas import ResumeContext, RoundType
 
 _QUESTION_JSON_SHAPE = """{
@@ -82,7 +83,17 @@ def _format_resume_context(resume: ResumeContext) -> str:
     if resume.certifications:
         lines.append("\nCertifications: " + ", ".join(c.name for c in resume.certifications))
 
-    return "\n".join(lines) if lines else "(no résumé data provided)"
+    text = "\n".join(lines) if lines else "(no résumé data provided)"
+
+    # A caller could submit an arbitrarily large résumé payload (no field
+    # has a length cap) — truncating here bounds both the Groq request
+    # cost and the risk of blowing past the model's context window,
+    # regardless of which field the bulk came from.
+    max_chars = get_settings().max_resume_context_chars
+    if len(text) > max_chars:
+        text = text[:max_chars] + "\n... [résumé context truncated]"
+
+    return text
 
 
 def build_generation_prompt(

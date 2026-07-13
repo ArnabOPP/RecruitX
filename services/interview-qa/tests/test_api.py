@@ -158,6 +158,32 @@ def test_error_responses_never_leak_tracebacks(client):
     assert 'File "' not in body["detail"]
 
 
+def test_production_without_required_auth_logs_security_warning(caplog):
+    """environment=production with auth still off must be loud in logs —
+    silent misconfiguration here means the Groq quota is wide open."""
+    from app.config import Settings
+    from app.main import _warn_if_unprotected_in_production
+
+    settings = Settings(environment="production", require_api_key=False)
+
+    with caplog.at_level("WARNING"):
+        _warn_if_unprotected_in_production(settings)
+
+    assert any("environment=production" in r.message and "INTERVIEW_QA_REQUIRE_API_KEY" in r.message for r in caplog.records)
+
+
+def test_production_with_required_auth_logs_no_warning(caplog):
+    from app.config import Settings
+    from app.main import _warn_if_unprotected_in_production
+
+    settings = Settings(environment="production", require_api_key=True, api_keys="some-key")
+
+    with caplog.at_level("WARNING"):
+        _warn_if_unprotected_in_production(settings)
+
+    assert not any("environment=production" in r.message for r in caplog.records)
+
+
 def test_readiness_reflects_invalid_credentials_not_just_missing(monkeypatch):
     """A configured-but-wrong/revoked key must report not-ready, distinct
     from the "no key at all" case — this is what startup key validation
