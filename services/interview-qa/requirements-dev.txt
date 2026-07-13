@@ -1,0 +1,8 @@
+# Development / CI-only dependencies (not needed in the production image).
+-r requirements.txt
+
+pytest==9.1.1
+httpx==0.28.1
+
+ruff==0.15.21
+mypy==2.2.0
