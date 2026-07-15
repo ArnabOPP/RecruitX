@@ -1,0 +1,164 @@
+### One-command local spin-up of the full Recruitix platform: all eight
+### services + Redis, wired together with service-DNS URLs (not the
+### localhost ports each service's own .env.example uses for standalone
+### local dev). Each service is still independently deployable — this
+### file exists purely for local integration testing/demos, not as a
+### production manifest (no replicas, no secrets management, no restart
+### policy tuning beyond "restart on crash").
+###
+### Usage:
+###   1. Put a real GROQ_API_KEY in a .env file next to this one (interview-qa
+###      and speech-io both need it; docker-compose auto-loads .env).
+###   2. docker compose up --build
+###   3. Orchestrator (the single front door) is at http://localhost:8004
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  cv-parser:
+    build: ./services/cv-parser
+    ports:
+      - "8100:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  interview-qa:
+    build: ./services/interview-qa
+    ports:
+      - "8000:8000"
+    environment:
+      INTERVIEW_QA_GROQ_API_KEY: "${GROQ_API_KEY}"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  speech-io:
+    build: ./services/speech-io
+    ports:
+      - "8001:8000"
+    environment:
+      SPEECH_IO_GROQ_API_KEY: "${GROQ_API_KEY}"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  answer-grading:
+    build: ./services/answer-grading
+    ports:
+      - "8002:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  code-eval:
+    build: ./services/code-eval
+    ports:
+      - "8003:8000"
+    # code-eval grades submissions by launching its own sandboxed Docker
+    # containers (--network none, resource-limited) — it needs the host's
+    # Docker socket to do that. This grants the container real control
+    # over the host's Docker daemon; see services/code-eval/README.md for
+    # the full security discussion. Fine for local dev, not something to
+    # do casually in a shared/production environment.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  biometric-auth:
+    build: ./services/biometric-auth
+    ports:
+      - "8005:8000"
+    # Enrolled face embeddings are durable reference data (SQLite), unlike
+    # every other service's stateless/Redis-ephemeral data — persisted to
+    # a named volume so `docker compose down` doesn't silently wipe
+    # enrolled candidates.
+    volumes:
+      - biometric-auth-data:/srv/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  proctoring:
+    build: ./services/proctoring
+    ports:
+      - "8006:8000"
+    environment:
+      PROCTORING_REDIS_URI: "redis://redis:6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  orchestrator:
+    build: ./services/orchestrator
+    ports:
+      - "8004:8000"
+    environment:
+      ORCHESTRATOR_REDIS_URI: "redis://redis:6379"
+      ORCHESTRATOR_CV_PARSER_BASE_URL: "http://cv-parser:8000"
+      ORCHESTRATOR_INTERVIEW_QA_BASE_URL: "http://interview-qa:8000"
+      ORCHESTRATOR_SPEECH_IO_BASE_URL: "http://speech-io:8000"
+      ORCHESTRATOR_ANSWER_GRADING_BASE_URL: "http://answer-grading:8000"
+      ORCHESTRATOR_CODE_EVAL_BASE_URL: "http://code-eval:8000"
+      ORCHESTRATOR_BIOMETRIC_AUTH_BASE_URL: "http://biometric-auth:8000"
+      ORCHESTRATOR_PROCTORING_BASE_URL: "http://proctoring:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      cv-parser:
+        condition: service_healthy
+      interview-qa:
+        condition: service_healthy
+      speech-io:
+        condition: service_healthy
+      answer-grading:
+        condition: service_healthy
+      code-eval:
+        condition: service_healthy
+      biometric-auth:
+        condition: service_healthy
+      proctoring:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  biometric-auth-data:
