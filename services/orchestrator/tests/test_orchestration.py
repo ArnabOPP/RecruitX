@@ -10,6 +10,7 @@ import pytest
 
 from app import orchestration
 from app.orchestration import (
+    IdentityVerificationError,
     OrchestrationError,
     create_session,
     get_report,
@@ -62,12 +63,20 @@ def _patch_clients(monkeypatch):
     async def fake_evaluate(language, source_code, test_cases, expected_complexity):
         return {"correctness": {"passed": 1, "total": 1, "pass_rate": 1.0}, "overall_score": 0.9}
 
+    async def fake_verify(candidate_id, files):
+        return {"candidate_id": candidate_id, "match": True, "similarity": 0.95, "threshold": 0.38}
+
+    async def fake_get_summary(session_id):
+        return None
+
     monkeypatch.setattr(orchestration.cv_parser_client, "parse_resume", fake_parse_resume)
     monkeypatch.setattr(orchestration.interview_qa_client, "generate_questions", fake_generate_questions)
     monkeypatch.setattr(orchestration.interview_qa_client, "generate_followup", fake_generate_followup)
     monkeypatch.setattr(orchestration.answer_grading_client, "score", fake_score)
     monkeypatch.setattr(orchestration.speech_io_client, "transcribe", fake_transcribe)
     monkeypatch.setattr(orchestration.code_eval_client, "evaluate", fake_evaluate)
+    monkeypatch.setattr(orchestration.biometric_auth_client, "verify", fake_verify)
+    monkeypatch.setattr(orchestration.proctoring_client, "get_summary", fake_get_summary)
 
 
 @pytest.mark.asyncio
@@ -220,3 +229,80 @@ async def test_get_report_aggregates_scores():
     report = await get_report(store, session_id)
     assert report["overall_average_score"] == 0.75
     assert len(report["history"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_report_includes_proctoring_summary_when_present(monkeypatch):
+    async def fake_get_summary(session_id):
+        return {"session_id": session_id, "frames_processed": 12, "integrity_score": 91.0, "event_counts": {}, "events": []}
+
+    monkeypatch.setattr(orchestration.proctoring_client, "get_summary", fake_get_summary)
+
+    store = FakeSessionStore()
+    session = await create_session(store, b"resume", "r.pdf", None, 0, 0, False)
+    report = await get_report(store, session["session_id"])
+
+    assert report["proctoring_summary"]["integrity_score"] == 91.0
+
+
+@pytest.mark.asyncio
+async def test_get_report_tolerates_missing_proctoring_summary():
+    """proctoring_client.get_summary returns None when no snapshots were
+    ever submitted for a session — this is a normal outcome, not an error,
+    so the report must still succeed."""
+    store = FakeSessionStore()
+    session = await create_session(store, b"resume", "r.pdf", None, 0, 0, False)
+    report = await get_report(store, session["session_id"])
+
+    assert report["proctoring_summary"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_report_tolerates_proctoring_service_down(monkeypatch):
+    from app.clients.base import DownstreamServiceError
+
+    async def fake_get_summary(session_id):
+        raise DownstreamServiceError("proctoring", "request failed: connection refused")
+
+    monkeypatch.setattr(orchestration.proctoring_client, "get_summary", fake_get_summary)
+
+    store = FakeSessionStore()
+    session = await create_session(store, b"resume", "r.pdf", None, 0, 0, False)
+    report = await get_report(store, session["session_id"])
+
+    assert report["proctoring_summary"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_session_with_matching_face_succeeds():
+    store = FakeSessionStore()
+    session = await create_session(
+        store, b"resume", "r.pdf", None, 1, 0, False,
+        candidate_id="cand-1", face_files=[("face.jpg", b"fake-bytes", "image/jpeg")],
+    )
+    assert session["candidate_id"] == "cand-1"
+
+
+@pytest.mark.asyncio
+async def test_create_session_with_non_matching_face_raises(monkeypatch):
+    async def fake_verify_no_match(candidate_id, files):
+        return {"candidate_id": candidate_id, "match": False, "similarity": 0.1, "threshold": 0.38}
+
+    monkeypatch.setattr(orchestration.biometric_auth_client, "verify", fake_verify_no_match)
+
+    store = FakeSessionStore()
+    with pytest.raises(IdentityVerificationError):
+        await create_session(
+            store, b"resume", "r.pdf", None, 1, 0, False,
+            candidate_id="cand-1", face_files=[("face.jpg", b"fake-bytes", "image/jpeg")],
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_session_without_candidate_id_skips_verification():
+    """No candidate_id/face_files supplied -> verification is simply
+    skipped (this deployment's require_biometric_verification gate, if
+    any, is enforced at the API layer, not here)."""
+    store = FakeSessionStore()
+    session = await create_session(store, b"resume", "r.pdf", None, 1, 0, False)
+    assert session["candidate_id"] is None

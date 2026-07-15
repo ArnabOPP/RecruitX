@@ -56,3 +56,15 @@ class SessionReport(BaseModel):
     round: str
     history: list[dict]
     overall_average_score: float | None = None
+    proctoring_summary: dict | None = None
+
+
+class ProctoringSnapshotResponse(BaseModel):
+    session_id: str
+    faces_detected: int
+    head_pose_deviation_degrees: float | None
+    gaze_offset: float | None
+    flagged_this_frame: list[str]
+    events_recorded: list[str]
+    integrity_score: float
+    frames_processed: int

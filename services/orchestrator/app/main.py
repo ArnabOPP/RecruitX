@@ -27,12 +27,14 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .auth import verify_api_key
+from .clients import proctoring_client
 from .clients.base import DownstreamServiceError
 from .config import get_settings
 from .errors import ErrorResponse
 from .logging_config import configure_logging, request_id_var
 from .middleware import MaxBodySizeMiddleware
 from .orchestration import (
+    IdentityVerificationError,
     OrchestrationError,
     create_session,
     get_report,
@@ -45,6 +47,7 @@ from .schemas import (
     CodeSubmissionRequest,
     CodeSubmissionResponse,
     CreateSessionResponse,
+    ProctoringSnapshotResponse,
     QuestionOut,
     SessionReport,
 )
@@ -122,14 +125,15 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
-# /sessions (résumé upload) and /answer/audio carry file uploads with
-# their own, larger, file-specific limits enforced inside the endpoints —
-# exempted here the same way speech-io exempts /transcribe.
+# /sessions (résumé + optional face_files upload), /answer/audio, and
+# /proctoring/snapshot carry file uploads with their own, larger,
+# file-specific limits enforced inside the endpoints — exempted here the
+# same way speech-io exempts /transcribe.
 app.add_middleware(
     MaxBodySizeMiddleware,
     max_bytes=settings.max_request_body_bytes,
     exempt_paths=frozenset({"/api/v1/sessions"}),
-    exempt_path_suffixes=("/answer/audio",),
+    exempt_path_suffixes=("/answer/audio", "/proctoring/snapshot"),
 )
 
 
@@ -172,6 +176,11 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 @app.exception_handler(SessionNotFoundError)
 async def session_not_found_handler(request: Request, exc: SessionNotFoundError) -> JSONResponse:
     return _error_response(404, "not_found", f"No session found with id {exc}.")
+
+
+@app.exception_handler(IdentityVerificationError)
+async def identity_verification_error_handler(request: Request, exc: IdentityVerificationError) -> JSONResponse:
+    return _error_response(403, "identity_verification_failed", str(exc))
 
 
 @app.exception_handler(OrchestrationError)
@@ -220,10 +229,13 @@ def capabilities(request: Request) -> dict:
             "speech_io": settings.speech_io_base_url,
             "answer_grading": settings.answer_grading_base_url,
             "code_eval": settings.code_eval_base_url,
+            "biometric_auth": settings.biometric_auth_base_url,
+            "proctoring": settings.proctoring_base_url,
         },
         "default_personal_question_count": settings.default_personal_question_count,
         "default_hr_question_count": settings.default_hr_question_count,
         "default_enable_followups": settings.default_enable_followups,
+        "require_biometric_verification": settings.require_biometric_verification,
     }
 
 
@@ -240,7 +252,10 @@ def _question_out(session_data: dict) -> QuestionOut | None:
 @app.post(
     "/api/v1/sessions",
     response_model=CreateSessionResponse,
-    responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}, 413: {"model": ErrorResponse}, 502: {"model": ErrorResponse}},
+    responses={
+        400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}, 403: {"model": ErrorResponse},
+        413: {"model": ErrorResponse}, 502: {"model": ErrorResponse},
+    },
     tags=["sessions"],
     dependencies=[Depends(verify_api_key)],
 )
@@ -252,6 +267,8 @@ async def create_session_endpoint(
     personal_question_count: int | None = None,
     hr_question_count: int | None = None,
     enable_followups: bool | None = None,
+    candidate_id: str | None = None,
+    face_files: list[UploadFile] | None = None,
 ) -> CreateSessionResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename.")
@@ -266,6 +283,30 @@ async def create_session_endpoint(
     if not data:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
+    if settings.require_biometric_verification and not (candidate_id and face_files):
+        raise HTTPException(
+            status_code=400,
+            detail="This deployment requires candidate_id and face_files for identity verification.",
+        )
+
+    face_upload: list[tuple[str, bytes, str]] | None = None
+    if candidate_id and face_files:
+        if len(face_files) > settings.max_face_images_per_request:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Too many face images: {len(face_files)} exceeds the {settings.max_face_images_per_request}-image limit.",
+            )
+        face_upload = []
+        for face_file in face_files:
+            face_data = await face_file.read()
+            if not face_data:
+                raise HTTPException(status_code=422, detail="A face_files image is empty.")
+            if len(face_data) > settings.max_face_image_bytes:
+                raise HTTPException(
+                    status_code=413, detail=f"A face image exceeds the {settings.max_face_image_bytes}-byte limit."
+                )
+            face_upload.append((face_file.filename or "face.jpg", face_data, face_file.content_type or "image/jpeg"))
+
     store = get_session_store()
     session_data = await create_session(
         store,
@@ -275,6 +316,8 @@ async def create_session_endpoint(
         personal_question_count if personal_question_count is not None else settings.default_personal_question_count,
         hr_question_count if hr_question_count is not None else settings.default_hr_question_count,
         enable_followups if enable_followups is not None else settings.default_enable_followups,
+        candidate_id,
+        face_upload,
     )
 
     return CreateSessionResponse(
@@ -357,6 +400,35 @@ async def submit_code_endpoint(
     store = get_session_store()
     result = await submit_code(store, session_id, body.language, body.source_code, body.test_cases, body.expected_complexity)
     return CodeSubmissionResponse(result=result["result"], status=result["status"])
+
+
+@app.post(
+    "/api/v1/sessions/{session_id}/proctoring/snapshot",
+    response_model=ProctoringSnapshotResponse,
+    responses={
+        401: {"model": ErrorResponse}, 404: {"model": ErrorResponse},
+        413: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 502: {"model": ErrorResponse},
+    },
+    tags=["sessions"],
+    dependencies=[Depends(verify_api_key)],
+)
+@limiter.limit(settings.rate_limit_default)
+async def proctoring_snapshot_endpoint(
+    request: Request, session_id: str = Path(...), file: UploadFile = File(...)
+) -> ProctoringSnapshotResponse:
+    store = get_session_store()
+    await store.load(session_id)  # 404s via SessionNotFoundError if the session doesn't exist
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Snapshot image is empty.")
+    if len(data) > settings.max_snapshot_image_bytes:
+        raise HTTPException(status_code=413, detail=f"Snapshot image exceeds the {settings.max_snapshot_image_bytes}-byte limit.")
+
+    result = await proctoring_client.submit_snapshot(
+        session_id, file.filename or "snapshot.jpg", data, file.content_type or "image/jpeg"
+    )
+    return ProctoringSnapshotResponse(**result)
 
 
 @app.get(

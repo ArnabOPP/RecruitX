@@ -15,20 +15,31 @@ service's README for why: none of the five services authors problems).
 
 from __future__ import annotations
 
+import logging
+
 from . import mapping
 from .clients import (
     answer_grading_client,
+    biometric_auth_client,
     code_eval_client,
     cv_parser_client,
     interview_qa_client,
+    proctoring_client,
     speech_io_client,
 )
+from .clients.base import DownstreamServiceError
 from .session_store import SessionStore
 
 _TEXT_ROUNDS = ("personal", "hr")
 
+logger = logging.getLogger("orchestrator.orchestration")
+
 
 class OrchestrationError(Exception):
+    pass
+
+
+class IdentityVerificationError(OrchestrationError):
     pass
 
 
@@ -40,7 +51,17 @@ async def create_session(
     personal_question_count: int,
     hr_question_count: int,
     enable_followups: bool,
+    candidate_id: str | None = None,
+    face_files: list[tuple[str, bytes, str]] | None = None,
 ) -> dict:
+    if candidate_id is not None and face_files:
+        verify_resp = await biometric_auth_client.verify(candidate_id, face_files)
+        if not verify_resp.get("match"):
+            raise IdentityVerificationError(
+                f"Face verification failed for candidate_id {candidate_id} "
+                f"(similarity {verify_resp.get('similarity')})."
+            )
+
     parsed = await cv_parser_client.parse_resume(resume_bytes, filename)
     resume_context = mapping.map_parsed_resume_to_resume_context(parsed)
 
@@ -49,6 +70,7 @@ async def create_session(
         "round": "personal",
         "resume_context": resume_context,
         "target_company": target_company,
+        "candidate_id": candidate_id,
         "round_config": {
             "personal_question_count": personal_question_count,
             "hr_question_count": hr_question_count,
@@ -222,10 +244,22 @@ async def get_report(store: SessionStore, session_id: str) -> dict:
         h["score"]["overall_score"] for h in session_data["history"] if "score" in h and h["score"] is not None
     ]
     overall_average_score = sum(text_scores) / len(text_scores) if text_scores else None
+
+    proctoring_summary: dict | None = None
+    try:
+        proctoring_summary = await proctoring_client.get_summary(session_id)
+    except DownstreamServiceError as exc:
+        # Proctoring being unreachable shouldn't block a candidate from
+        # seeing their own interview report — unlike a downstream failure
+        # during an active answer submission, this is a best-effort
+        # enrichment of a report that's otherwise already complete.
+        logger.warning("Could not fetch proctoring summary for session %s: %s", session_id, exc)
+
     return {
         "session_id": session_data["session_id"],
         "status": session_data["status"],
         "round": session_data["round"],
         "history": session_data["history"],
         "overall_average_score": overall_average_score,
+        "proctoring_summary": proctoring_summary,
     }

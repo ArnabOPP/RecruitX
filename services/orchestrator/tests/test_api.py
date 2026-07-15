@@ -61,12 +61,28 @@ def client(monkeypatch):
     async def fake_evaluate(language, source_code, test_cases, expected_complexity):
         return {"correctness": {"passed": 1, "total": 1, "pass_rate": 1.0}, "overall_score": 0.9}
 
+    async def fake_verify(candidate_id, files):
+        return {"candidate_id": candidate_id, "match": True, "similarity": 0.95, "threshold": 0.38}
+
+    async def fake_get_summary(session_id):
+        return None
+
+    async def fake_submit_snapshot(session_id, filename, image_bytes, content_type):
+        return {
+            "session_id": session_id, "faces_detected": 1, "head_pose_deviation_degrees": 5.0,
+            "gaze_offset": 0.1, "flagged_this_frame": [], "events_recorded": [], "integrity_score": 100.0,
+            "frames_processed": 1,
+        }
+
     monkeypatch.setattr(orchestration.cv_parser_client, "parse_resume", fake_parse_resume)
     monkeypatch.setattr(orchestration.interview_qa_client, "generate_questions", fake_generate_questions)
     monkeypatch.setattr(orchestration.interview_qa_client, "generate_followup", fake_generate_followup)
     monkeypatch.setattr(orchestration.answer_grading_client, "score", fake_score)
     monkeypatch.setattr(orchestration.speech_io_client, "transcribe", fake_transcribe)
     monkeypatch.setattr(orchestration.code_eval_client, "evaluate", fake_evaluate)
+    monkeypatch.setattr(orchestration.biometric_auth_client, "verify", fake_verify)
+    monkeypatch.setattr(orchestration.proctoring_client, "get_summary", fake_get_summary)
+    monkeypatch.setattr("app.main.proctoring_client.submit_snapshot", fake_submit_snapshot)
 
     from app.main import app
 
@@ -90,7 +106,9 @@ def test_capabilities(client):
     assert resp.status_code == 200
     body = resp.json()
     assert "downstream_services" in body
-    assert set(body["downstream_services"]) == {"cv_parser", "interview_qa", "speech_io", "answer_grading", "code_eval"}
+    assert set(body["downstream_services"]) == {
+        "cv_parser", "interview_qa", "speech_io", "answer_grading", "code_eval", "biometric_auth", "proctoring",
+    }
 
 
 def test_metrics_exposed(client):
@@ -250,3 +268,87 @@ def test_downstream_failure_returns_502(monkeypatch):
     body = resp.json()
     assert body["error"] == "downstream_error"
     assert "cv-parser" in body["detail"]
+
+
+def test_create_session_with_matching_face_succeeds(client):
+    resp = client.post(
+        "/api/v1/sessions",
+        files={
+            "file": ("resume.pdf", b"fake pdf bytes", "application/pdf"),
+            "face_files": ("face.jpg", b"fake jpeg bytes", "image/jpeg"),
+        },
+        params={"candidate_id": "cand-1", "personal_question_count": 0, "hr_question_count": 0},
+    )
+    assert resp.status_code == 200
+
+
+def test_create_session_with_non_matching_face_is_403(client, monkeypatch):
+    async def fake_verify_no_match(candidate_id, files):
+        return {"candidate_id": candidate_id, "match": False, "similarity": 0.1, "threshold": 0.38}
+
+    monkeypatch.setattr(orchestration.biometric_auth_client, "verify", fake_verify_no_match)
+
+    resp = client.post(
+        "/api/v1/sessions",
+        files={
+            "file": ("resume.pdf", b"fake pdf bytes", "application/pdf"),
+            "face_files": ("face.jpg", b"fake jpeg bytes", "image/jpeg"),
+        },
+        params={"candidate_id": "cand-1", "personal_question_count": 0, "hr_question_count": 0},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"] == "identity_verification_failed"
+
+
+def test_proctoring_snapshot_on_existing_session(client):
+    create_resp = client.post(
+        "/api/v1/sessions",
+        files={"file": ("resume.pdf", b"fake pdf bytes", "application/pdf")},
+        params={"personal_question_count": 0, "hr_question_count": 0},
+    )
+    session_id = create_resp.json()["session_id"]
+
+    snapshot_resp = client.post(
+        f"/api/v1/sessions/{session_id}/proctoring/snapshot",
+        files={"file": ("frame.jpg", b"fake jpeg bytes", "image/jpeg")},
+    )
+    assert snapshot_resp.status_code == 200
+    body = snapshot_resp.json()
+    assert body["session_id"] == session_id
+    assert body["integrity_score"] == 100.0
+
+
+def test_proctoring_snapshot_on_unknown_session_is_404(client):
+    resp = client.post(
+        "/api/v1/sessions/never-created-session/proctoring/snapshot",
+        files={"file": ("frame.jpg", b"fake jpeg bytes", "image/jpeg")},
+    )
+    assert resp.status_code == 404
+
+
+def test_proctoring_snapshot_empty_image_is_422(client):
+    create_resp = client.post(
+        "/api/v1/sessions",
+        files={"file": ("resume.pdf", b"fake pdf bytes", "application/pdf")},
+        params={"personal_question_count": 0, "hr_question_count": 0},
+    )
+    session_id = create_resp.json()["session_id"]
+
+    resp = client.post(
+        f"/api/v1/sessions/{session_id}/proctoring/snapshot",
+        files={"file": ("frame.jpg", b"", "image/jpeg")},
+    )
+    assert resp.status_code == 422
+
+
+def test_report_includes_proctoring_summary_field(client):
+    create_resp = client.post(
+        "/api/v1/sessions",
+        files={"file": ("resume.pdf", b"fake pdf bytes", "application/pdf")},
+        params={"personal_question_count": 0, "hr_question_count": 0},
+    )
+    session_id = create_resp.json()["session_id"]
+
+    report_resp = client.get(f"/api/v1/sessions/{session_id}/report")
+    assert report_resp.status_code == 200
+    assert "proctoring_summary" in report_resp.json()

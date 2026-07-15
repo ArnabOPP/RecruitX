@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     speech_io_base_url: str = "http://localhost:8001"
     answer_grading_base_url: str = "http://localhost:8002"
     code_eval_base_url: str = "http://localhost:8003"
+    biometric_auth_base_url: str = "http://localhost:8005"
+    proctoring_base_url: str = "http://localhost:8006"
 
     # Shared-secret keys this service presents to each downstream service
     # if that service has its own require_api_key turned on. Empty is
@@ -34,8 +36,22 @@ class Settings(BaseSettings):
     speech_io_api_key: str = ""
     answer_grading_api_key: str = ""
     code_eval_api_key: str = ""
+    biometric_auth_api_key: str = ""
+    proctoring_api_key: str = ""
 
     downstream_timeout_seconds: float = 45.0
+
+    # --- Biometric verification gate -----------------------------------
+    # Off by default so existing behavior (and every prior test) is
+    # unaffected — a deployment opts in once biometric-auth is actually
+    # enrolled/reachable. When on, /sessions requires candidate_id +
+    # face_files and rejects session creation on a non-match, the same
+    # "the deterministic engine decides, not the client" principle as
+    # biometric-auth's own /verify.
+    require_biometric_verification: bool = False
+    max_face_image_bytes: int = 5 * 1024 * 1024
+    max_face_images_per_request: int = 10
+    max_snapshot_image_bytes: int = 5 * 1024 * 1024
 
     # --- Session store (Redis) -------------------------------------------
     # Unlike the other services (where Redis is optional, only needed for

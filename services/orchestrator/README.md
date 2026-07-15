@@ -1,12 +1,14 @@
 # Recruitix Orchestrator Service
 
-Wires the five independent Recruitix AI/ML services —
+Wires the seven independent Recruitix AI/ML services —
 [cv-parser](../cv-parser), [interview-qa](../interview-qa),
-[speech-io](../speech-io), [answer-grading](../answer-grading), and
-[code-eval](../code-eval) — into one coherent interview session: résumé
-upload → personal round → HR round → coding round → report. None of the
-five services know about each other; this is what turns them into a
-product flow.
+[speech-io](../speech-io), [answer-grading](../answer-grading),
+[code-eval](../code-eval), [biometric-auth](../biometric-auth), and
+[proctoring](../proctoring) — into one coherent interview session: (optional
+face verification) → résumé upload → personal round → HR round → coding
+round → report, with continuous proctoring snapshots folded into the final
+report. None of the seven services know about each other; this is what
+turns them into a product flow.
 
 ## What this service actually owns
 
@@ -43,12 +45,36 @@ product flow.
 ## Flow
 
 ```
-POST /api/v1/sessions                     résumé upload -> cv-parser -> mapped context -> first question
-POST /api/v1/sessions/{id}/answer         typed answer -> answer-grading -> next question (or follow-up)
-POST /api/v1/sessions/{id}/answer/audio   spoken answer -> speech-io transcribe -> (same as above)
-POST /api/v1/sessions/{id}/code           source + test cases -> code-eval -> session completed
-GET  /api/v1/sessions/{id}/report         full transcript + every score, aggregated
+POST /api/v1/sessions                            résumé upload (+ optional candidate_id/face_files -> biometric-auth verify) -> cv-parser -> mapped context -> first question
+POST /api/v1/sessions/{id}/answer                typed answer -> answer-grading -> next question (or follow-up)
+POST /api/v1/sessions/{id}/answer/audio          spoken answer -> speech-io transcribe -> (same as above)
+POST /api/v1/sessions/{id}/proctoring/snapshot   one real frame -> proctoring -> this-frame flags + running integrity score
+POST /api/v1/sessions/{id}/code                  source + test cases -> code-eval -> session completed
+GET  /api/v1/sessions/{id}/report                full transcript + every score + proctoring summary, aggregated
 ```
+
+### Identity verification (optional)
+
+When `ORCHESTRATOR_REQUIRE_BIOMETRIC_VERIFICATION=1`, `POST /api/v1/sessions`
+requires `candidate_id` and `face_files` (a few real JPEG frames): the
+orchestrator calls biometric-auth's `/verify` before creating the session
+and rejects with `403 identity_verification_failed` on a non-match. Off by
+default so existing deployments and every prior test are unaffected — the
+gate exists for a deployment that has already enrolled its candidates with
+biometric-auth. Enrollment itself is not orchestrated here — it happens
+directly against biometric-auth's own `/enroll` endpoint as a one-time
+setup step, separate from any interview session.
+
+### Proctoring
+
+`POST /api/v1/sessions/{id}/proctoring/snapshot` forwards a real snapshot
+frame to the proctoring service, reusing the orchestrator's own
+`session_id` as proctoring's session key — no separate mapping to
+maintain. The final `GET /report` best-effort fetches the proctoring
+summary (event counts, integrity score, event timeline) and includes it
+as `proctoring_summary`; a session with no snapshots ever submitted, or a
+proctoring service that's temporarily unreachable, both degrade to
+`proctoring_summary: null` rather than failing the whole report.
 
 ## Run locally
 
@@ -71,20 +97,22 @@ curl -X POST http://localhost:8004/api/v1/sessions \
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/v1/sessions` | résumé upload -> new session + first question |
+| `POST /api/v1/sessions` | résumé upload (+ optional face verification) -> new session + first question |
 | `POST /api/v1/sessions/{id}/answer` | typed answer -> score + next question |
 | `POST /api/v1/sessions/{id}/answer/audio` | spoken answer -> transcribe, score, next question |
+| `POST /api/v1/sessions/{id}/proctoring/snapshot` | one real frame -> proctoring flags + running integrity score |
 | `POST /api/v1/sessions/{id}/code` | code submission -> code-eval result, completes the session |
-| `GET /api/v1/sessions/{id}/report` | full session transcript + aggregate score |
-| `GET /health/ready` | readiness — Redis reachable (not gated on all 5 downstream services, see below) |
+| `GET /api/v1/sessions/{id}/report` | full session transcript + aggregate score + proctoring summary |
+| `GET /health/ready` | readiness — Redis reachable (not gated on all downstream services, see below) |
 | `GET /api/v1/capabilities` | configured downstream URLs, default round config |
 
 ## Configuration
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `ORCHESTRATOR_CV_PARSER_BASE_URL` / `_INTERVIEW_QA_BASE_URL` / `_SPEECH_IO_BASE_URL` / `_ANSWER_GRADING_BASE_URL` / `_CODE_EVAL_BASE_URL` | `localhost:8100/8000/8001/8002/8003` | downstream service locations |
+| `ORCHESTRATOR_CV_PARSER_BASE_URL` / `_INTERVIEW_QA_BASE_URL` / `_SPEECH_IO_BASE_URL` / `_ANSWER_GRADING_BASE_URL` / `_CODE_EVAL_BASE_URL` / `_BIOMETRIC_AUTH_BASE_URL` / `_PROCTORING_BASE_URL` | `localhost:8100/8000/8001/8002/8003/8005/8006` | downstream service locations |
 | `ORCHESTRATOR_*_API_KEY` (one per downstream service) | empty | shared-secret keys this service presents if that downstream service has its own auth turned on |
+| `ORCHESTRATOR_REQUIRE_BIOMETRIC_VERIFICATION` | `0` | when on, `/sessions` requires `candidate_id` + `face_files` and rejects on a non-match |
 | `ORCHESTRATOR_REDIS_URI` | `redis://localhost:6379` | the session store — required, no fallback |
 | `ORCHESTRATOR_SESSION_TTL_SECONDS` | `14400` (4h) | how long a session survives in Redis |
 | `ORCHESTRATOR_DEFAULT_PERSONAL_QUESTION_COUNT` / `_HR_QUESTION_COUNT` | `3` / `2` | default round sizes, overridable per session |
@@ -94,12 +122,12 @@ curl -X POST http://localhost:8004/api/v1/sessions \
 
 ## Why readiness only checks Redis
 
-`/health/ready` gates on Redis being reachable — not on all five
+`/health/ready` gates on Redis being reachable — not on all seven
 downstream services also being up. Gating on every downstream would make
 this service's own uptime hostage to any one of theirs going down for
 maintenance. A downstream outage instead surfaces per-call, as a `502`
 naming exactly which service failed, which is more actionable than a
-blanket "orchestrator is down" the moment one of six services blips.
+blanket "orchestrator is down" the moment one of eight services blips.
 
 ## Tests
 
@@ -108,7 +136,7 @@ pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-58 tests across eight files:
+62 tests across eight files:
 
 - `test_mapping.py` — the cv-parser -> interview-qa schema translation.
 - `test_orchestration.py` — round progression, follow-up sequencing, and
