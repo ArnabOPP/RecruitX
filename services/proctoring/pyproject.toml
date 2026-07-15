@@ -1,0 +1,32 @@
+[project]
+name = "recruitix-proctoring"
+version = "1.0.0"
+description = "MediaPipe gaze/head-pose + event-driven severity scoring for continuous Recruitix interview proctoring."
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4"]
+ignore = [
+  "E501",
+  "B008",   # FastAPI's Depends()-in-default-args is an intentional idiom
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+disallow_untyped_defs = false
+exclude = ["tests/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

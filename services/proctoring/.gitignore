@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+*.log
+
+.env
+
+# Model weights are large binary downloads, not source — pulled at build
+# time (see Dockerfile) or via the README's setup instructions, not
+# committed to git.
+models/*.task
