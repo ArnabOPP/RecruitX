@@ -28,8 +28,14 @@ jobs:
           cache-dependency-path: services/biometric-auth/requirements-dev.txt
 
       - name: Install system dependencies
-        # OpenCV (pulled in by mediapipe) needs these even for headless use.
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
+        # OpenCV (pulled in by mediapipe) needs libgl1/libglib2.0-0 even for
+        # headless use. libegl1/libgles2 (libGLESv2) are separately required
+        # by MediaPipe's FaceLandmarker specifically — confirmed by running
+        # this workflow locally via `act`, which failed with "libGLESv2.so.2:
+        # cannot open shared object file" before these were added; the same
+        # fix already applied to the Dockerfile after an equivalent container
+        # smoke-test failure.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libgomp1 libegl1 libgles2
 
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
